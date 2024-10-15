@@ -19,6 +19,8 @@ use cairo_lang_utils::Upcast;
 pub use self::semantic::*;
 pub use self::swapper::*;
 pub use self::syntax::*;
+use super::proc_macros::cache_group::{ProcMacroCacheDatabase, ProcMacroCacheGroup};
+use super::proc_macros::client::controller::ClientStatus;
 use crate::Tricks;
 
 mod semantic;
@@ -33,7 +35,8 @@ mod syntax;
     ParserDatabase,
     SemanticDatabase,
     SyntaxDatabase,
-    DocDatabase
+    DocDatabase,
+    ProcMacroCacheDatabase
 )]
 pub struct AnalysisDatabase {
     storage: salsa::Storage<Self>,
@@ -59,6 +62,15 @@ impl AnalysisDatabase {
                 });
         db.apply_plugin_suite(plugin_suite);
 
+        // proc-macro-server can be restarted many times but we want to keep these data across
+        // multiple server starts, so init it once per database, not per server.
+        db.set_attribute_macro_resolution(Default::default());
+        db.set_derive_macro_resolution(Default::default());
+        db.set_inline_macro_resolution(Default::default());
+        // We read this to check if client is available so it should be initialized.
+        // Default is disabled because we set this before even receiving client config.
+        db.set_proc_macro_client_status(ClientStatus::Disabled);
+
         db
     }
 
@@ -78,7 +90,7 @@ impl AnalysisDatabase {
     }
 
     /// Shortcut for settings compiler plugins from a [`PluginSuite`].
-    fn apply_plugin_suite(&mut self, plugin_suite: PluginSuite) {
+    pub(crate) fn apply_plugin_suite(&mut self, plugin_suite: PluginSuite) {
         self.set_macro_plugins(plugin_suite.plugins);
         self.set_inline_macro_plugins(plugin_suite.inline_macro_plugins.into());
         self.set_analyzer_plugins(plugin_suite.analyzer_plugins);

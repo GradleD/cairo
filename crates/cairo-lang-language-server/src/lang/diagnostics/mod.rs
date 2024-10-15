@@ -13,7 +13,7 @@ use crate::state::{FileDiagnostics, StateSnapshot};
 
 mod lsp;
 mod refresh;
-mod trigger;
+pub mod trigger;
 
 /// Schedules refreshing of diagnostics in a background thread.
 ///

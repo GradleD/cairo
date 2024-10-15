@@ -42,7 +42,7 @@ use std::io;
 use std::panic::RefUnwindSafe;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use cairo_lang_compiler::db::validate_corelib;
@@ -266,9 +266,9 @@ impl Backend {
         client_capabilities: ClientCapabilities,
         tricks: Tricks,
     ) -> State {
-        let db = AnalysisDatabase::new(&tricks);
         let notifier = Client::new(sender).notifier();
         let scarb_toolchain = ScarbToolchain::new(notifier);
+        let db = AnalysisDatabase::new(&tricks);
 
         State::new(db, client_capabilities, scarb_toolchain, tricks)
     }
@@ -343,6 +343,13 @@ impl Backend {
     // +--------------------------------------------------+
     fn event_loop(connection: &Connection, mut scheduler: Scheduler<'_>) -> Result<()> {
         for msg in connection.incoming() {
+            let Some(msg) = msg else {
+                // TODO ask murek, maybe debounce 10 milis or something?
+                scheduler.local(Self::run_idle_tasks);
+
+                continue;
+            };
+
             if connection.handle_shutdown(&msg)? {
                 break;
             }
@@ -352,9 +359,28 @@ impl Backend {
                 Message::Response(response) => scheduler.response(response),
             };
             scheduler.dispatch(task);
+
+            // Avoid busy-waiting, sleep for a short duration
+            std::thread::sleep(Duration::from_millis(1));
         }
 
         Ok(())
+    }
+
+    /// Executes tasks when there is no incoming message.
+    /// Warning! Keep it very cheap!
+    fn run_idle_tasks(
+        state: &mut State,
+        _notifier: Notifier,
+        _requester: &mut Requester<'_>,
+        _responder: Responder,
+    ) {
+        state.proc_macro_controller.maybe_update_state(
+            &mut state.db,
+            &mut state.proc_macro_debouncer,
+            &state.config,
+            &state.scarb_toolchain,
+        );
     }
 
     /// Calls [`lang::db::AnalysisDatabaseSwapper::maybe_swap`] to do its work.
