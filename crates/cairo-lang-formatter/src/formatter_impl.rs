@@ -7,11 +7,62 @@ use cairo_lang_syntax::attribute::consts::FMT_SKIP_ATTR;
 use cairo_lang_syntax::node::ast::UsePath;
 use cairo_lang_syntax::node::db::SyntaxGroup;
 use cairo_lang_syntax::node::{SyntaxNode, Terminal, TypedSyntaxNode, ast};
+use cairo_lang_utils::ordered_hash_map::OrderedHashMap;
 use itertools::Itertools;
 use syntax::node::helpers::QueryAttrs;
 use syntax::node::kind::SyntaxKind;
 
 use crate::FormatterConfig;
+#[derive(Default)]
+struct UseTree(OrderedHashMap<String, UseTree>);
+
+impl UseTree {
+    /// Inserts a path into the `UseTree`, creating nested entries as needed.
+    fn insert_path(&mut self, db: &dyn SyntaxGroup, use_path: UsePath) {
+        match use_path {
+            UsePath::Leaf(leaf) => {
+                self.0.insert(leaf.extract_ident(db), UseTree::default());
+            }
+            UsePath::Single(single) => {
+                let segment = single.extract_ident(db);
+                let subtree = self.0.entry(segment).or_insert_with(UseTree::default);
+                subtree.insert_path(db, single.use_path(db));
+            }
+            UsePath::Multi(multi) => {
+                for sub_path in multi.use_paths(db).elements(db) {
+                    self.insert_path(db, sub_path);
+                }
+            }
+        }
+    }
+
+    /// Formats and returns use statements based on the contents of `self`.
+    pub fn format_use_statements(&self) -> Vec<String> {
+        let mut statements = Vec::new();
+        for (segment, subtree) in self.0.iter() {
+            if subtree.0.is_empty() {
+                statements.push(segment.clone());
+            } else {
+                statements.push(format!("{}::{{{}}}", segment, subtree));
+            }
+        }
+        statements
+    }
+}
+
+impl fmt::Display for UseTree {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut items: Vec<String> = Vec::new();
+        for (key, subtree) in self.0.iter() {
+            if subtree.0.is_empty() {
+                items.push(key.clone());
+            } else {
+                items.push(format!("{}::{{{}}}", key, subtree));
+            }
+        }
+        write!(f, "{}", items.join(", "))
+    }
+}
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, PartialOrd, Ord)]
 /// Defines the break point behaviour.
@@ -827,6 +878,24 @@ impl<'a> FormatterImpl<'a> {
         // TODO(ilya): consider not copying here.
         let mut children = self.db.get_children(syntax_node.clone()).to_vec();
         let n_children = children.len();
+
+        // Merge ItemUse and build a UseTree.
+        let mut use_tree = UseTree::default();
+        let mut use_items_to_format = vec![];
+        for child in &children {
+            if child.kind(self.db) == SyntaxKind::ItemUse {
+                let use_item = ast::ItemUse::from_syntax_node(self.db, child.clone());
+                use_tree.insert_path(self.db, use_item.use_path(self.db)); // Insert paths into `UseTree`
+                use_items_to_format.push(use_item);
+            }
+        }
+        if !use_items_to_format.is_empty() {
+            let formatted_statements = use_tree.format_use_statements(); // Call as instance method
+            for statement in formatted_statements {
+                println!("use {};", statement);
+            }
+        }
+
         if self.config.sort_module_level_items {
             if let SyntaxKind::UsePathList = syntax_node.kind(self.db) {
                 self.sort_inner_use_path(&mut children);
@@ -1014,7 +1083,6 @@ impl<'a> FormatterImpl<'a> {
         syntax_node.has_attr(self.db, FMT_SKIP_ATTR)
     }
 }
-
 /// Compares two `UsePath` nodes to determine their ordering.
 fn compare_use_paths(a: &UsePath, b: &UsePath, db: &dyn SyntaxGroup) -> Ordering {
     match (a, b) {
