@@ -35,14 +35,14 @@ impl<K, V> HashMapChangeTracker<K, V> {
     }
 }
 
-pub fn apply_proc_macro_server_responses(db: &mut AnalysisDatabase) {
+pub fn apply_proc_macro_server_responses(db: &mut AnalysisDatabase) -> bool {
     // TODO we should check here if there are live snapshots, but no idea if it is possible with
     // salsa public api. if there are snapshots running we can skip this job, this will lead to
     // more updates at once later and less cancellation.
 
     let client_status = db.proc_macro_client_status();
     let Some(client) = client_status.ready() else {
-        return;
+        return false;
     };
 
     let mut attribute_resolutions = HashMapChangeTracker::new(db.attribute_macro_resolution());
@@ -50,9 +50,15 @@ pub fn apply_proc_macro_server_responses(db: &mut AnalysisDatabase) {
     let mut inline_macro_resolutions = HashMapChangeTracker::new(db.inline_macro_resolution());
 
     let mut requests = client.requests_params.lock().unwrap();
+    let mut result = false;
 
     for response in client.available_responses() {
-        match requests.remove(&response.id).unwrap() {
+        result = true;
+
+        let params = requests.remove(&response.id);
+        let Some(params) = params else { todo!("how??") };
+
+        match params {
             RequestParams::Attribute(params) => {
                 if let Some(result) = parse(response) {
                     attribute_resolutions.insert(params, result);
@@ -71,6 +77,8 @@ pub fn apply_proc_macro_server_responses(db: &mut AnalysisDatabase) {
         };
     }
 
+    drop(requests);
+
     // Set input only if resolution HashMap changed, this way we don't recompute queries if there
     // were no updates.
 
@@ -85,6 +93,8 @@ pub fn apply_proc_macro_server_responses(db: &mut AnalysisDatabase) {
     if let Some(resolution) = inline_macro_resolutions.inner_if_changed() {
         db.set_inline_macro_resolution(resolution);
     }
+
+    result
 }
 
 fn parse<T: DeserializeOwned>(response: RpcResponse) -> Option<T> {

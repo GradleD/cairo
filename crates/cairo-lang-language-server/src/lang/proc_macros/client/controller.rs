@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use cairo_lang_defs::db::DefsGroup;
 use proc_macro_server_api::methods::defined_macros::DefinedMacrosResponse;
 
 use super::ProcMacroClient;
@@ -7,10 +8,10 @@ use crate::config::Config;
 use crate::lang::db::AnalysisDatabase;
 use crate::lang::proc_macros::cache_group::ProcMacroCacheGroup;
 use crate::lang::proc_macros::connection::ProcMacroServerConnection;
-use crate::lang::proc_macros::debouncer::Debouncer;
 use crate::lang::proc_macros::idle_job::apply_proc_macro_server_responses;
 use crate::lang::proc_macros::plugins::proc_macro_plugin_suite;
 use crate::toolchain::scarb::ScarbToolchain;
+use tracing::error;
 
 /// Manages lifecycle of proc-macro-server client.
 pub struct ProcMacroClientController {
@@ -43,6 +44,18 @@ impl ProcMacroClientController {
         self.retries_left != 0
     }
 
+    /// Runs in post sync task hook. Commonly starts proc-macro-server after config reload.
+    pub fn initialize_if_enabled_now(
+        &mut self,
+        db: &mut AnalysisDatabase,
+        config: &Config,
+        scarb: &ScarbToolchain,
+    ) {
+        if let ClientStatus::Disabled = db.proc_macro_client_status() {
+            self.initialize(db, config, scarb);
+        }
+    }
+
     /// Adds proc-macro-server related functionalities to db, if enabled.
     pub fn initialize(
         &mut self,
@@ -70,7 +83,9 @@ impl ProcMacroClientController {
                         Ok(defined_macros) => {
                             status_change.update(ClientStatusChange::Ready(defined_macros, client));
                         }
-                        Err(_) => {
+                        Err(err) => {
+                            error!("Fetching defined macros failed: {err:?}");
+
                             status_change.update(ClientStatusChange::Failed);
                         }
                     }
@@ -85,20 +100,17 @@ impl ProcMacroClientController {
     pub fn maybe_update_state(
         &mut self,
         db: &mut AnalysisDatabase,
-        debouncer: &mut Debouncer,
         config: &Config,
         scarb: &ScarbToolchain,
-    ) {
-        debouncer.run_debounced(|| {
-            let Some(status) = self.status_change.changed() else {
-                // Nothing changed, no need to do anything.
-                return;
-            };
-
+    ) -> bool {
+        let mut result = false;
+        if let Some(status) = self.status_change.changed() {
             self.update_state(db, config, scarb, status);
 
-            apply_proc_macro_server_responses(db);
-        });
+            result = true;
+        };
+
+        apply_proc_macro_server_responses(db) || result
     }
 
     fn update_state(
@@ -122,8 +134,15 @@ impl ProcMacroClientController {
             }
             ClientStatusChange::Ready(defined_macros, client) => {
                 let plugin = proc_macro_plugin_suite(defined_macros);
-                // TODO this is broken, it is removing previously set plugins
-                db.apply_plugin_suite(plugin);
+                // TODO we should remove previous proc-macro-server instane plugins here but no idea how to do this.
+
+                let mut macro_plugins = db.macro_plugins();
+                macro_plugins.extend(plugin.plugins);
+                db.set_macro_plugins(macro_plugins);
+
+                let mut inline_macro_plugins = Arc::unwrap_or_clone(db.inline_macro_plugins());
+                inline_macro_plugins.extend(plugin.inline_macro_plugins);
+                db.set_inline_macro_plugins(inline_macro_plugins.clone().into());
 
                 db.set_proc_macro_client_status(ClientStatus::Ready(client));
             }
@@ -142,7 +161,11 @@ pub enum ClientStatus {
 
 impl ClientStatus {
     pub fn ready(&self) -> Option<&ProcMacroClient> {
-        if let Self::Ready(client) = self { Some(client) } else { None }
+        if let Self::Ready(client) = self {
+            Some(client)
+        } else {
+            None
+        }
     }
 }
 

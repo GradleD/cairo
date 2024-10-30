@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::time::Duration;
 
 use cairo_lang_diagnostics::Diagnostics;
 use cairo_lang_lowering::diagnostic::LoweringDiagnostic;
@@ -10,13 +9,12 @@ use cairo_lang_semantic::SemanticDiagnostic;
 use lsp_types::{ClientCapabilities, Url};
 use salsa::ParallelDatabase;
 
-use crate::Tricks;
 use crate::config::Config;
 use crate::lang::db::{AnalysisDatabase, AnalysisDatabaseSwapper};
 use crate::lang::diagnostics::DiagnosticsController;
 use crate::lang::proc_macros::client::controller::ProcMacroClientController;
-use crate::lang::proc_macros::debouncer::Debouncer;
 use crate::toolchain::scarb::ScarbToolchain;
+use crate::Tricks;
 
 /// State of Language server.
 pub struct State {
@@ -29,7 +27,6 @@ pub struct State {
     pub tricks: Owned<Tricks>,
     pub diagnostics_controller: DiagnosticsController,
     pub proc_macro_controller: ProcMacroClientController,
-    pub proc_macro_debouncer: Debouncer,
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -64,7 +61,6 @@ impl State {
             tricks: Owned::new(tricks.into()),
             diagnostics_controller: DiagnosticsController::new(),
             proc_macro_controller: ProcMacroClientController::new(),
-            proc_macro_debouncer: Debouncer::new(Duration::from_millis(10)),
         }
     }
 

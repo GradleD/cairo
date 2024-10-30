@@ -64,15 +64,16 @@ use crate::lsp::capabilities::server::{
 };
 use crate::lsp::ext::CorelibVersionMismatch;
 use crate::lsp::result::LSPResult;
-use crate::project::ProjectManifestPath;
 use crate::project::scarb::update_crate_roots;
 use crate::project::unmanaged_core_crate::try_to_init_unmanaged_core;
+use crate::project::ProjectManifestPath;
 use crate::server::client::{Client, Notifier, Requester, Responder};
 use crate::server::connection::{Connection, ConnectionInitializer};
 use crate::server::schedule::thread::JoinHandle;
-use crate::server::schedule::{Scheduler, Task, event_loop_thread};
+use crate::server::schedule::{event_loop_thread, Scheduler, Task};
 use crate::state::State;
 use crate::toolchain::scarb::ScarbToolchain;
+use lang::proc_macros::debouncer::Debouncer;
 
 mod config;
 mod env_config;
@@ -139,8 +140,8 @@ pub fn start_with_tricks(tricks: Tricks) -> ExitCode {
 
 /// Special function to run the language server in end-to-end tests.
 #[cfg(feature = "testing")]
-pub fn build_service_for_e2e_tests()
--> (Box<dyn FnOnce() -> BackendForTesting + Send>, lsp_server::Connection) {
+pub fn build_service_for_e2e_tests(
+) -> (Box<dyn FnOnce() -> BackendForTesting + Send>, lsp_server::Connection) {
     BackendForTesting::new_for_testing(Default::default())
 }
 
@@ -153,8 +154,8 @@ fn init_logging() -> Option<impl Drop> {
 
     use tracing_chrome::ChromeLayerBuilder;
     use tracing_subscriber::filter::{EnvFilter, LevelFilter, Targets};
-    use tracing_subscriber::fmt::Layer;
     use tracing_subscriber::fmt::time::Uptime;
+    use tracing_subscriber::fmt::Layer;
     use tracing_subscriber::prelude::*;
 
     let mut guard = None;
@@ -292,6 +293,9 @@ impl Backend {
             // we basically never hit such a case in CairoLS in happy paths.
             scheduler.on_sync_task(Self::refresh_diagnostics);
 
+            // Starts proc-macro-server after config has been changed, this counts first load.
+            scheduler.on_sync_task(Self::maybe_start_proc_macro_server);
+
             let result = Self::event_loop(&connection, scheduler);
 
             if let Err(err) = connection.close() {
@@ -342,10 +346,21 @@ impl Backend {
     // | Commit: 46a457318d8d259376a2b458b3f814b9b795fe69 |
     // +--------------------------------------------------+
     fn event_loop(connection: &Connection, mut scheduler: Scheduler<'_>) -> Result<()> {
+        let mut idle_job_debounce = Debouncer::new(Duration::from_millis(100));
+
         for msg in connection.incoming() {
             let Some(msg) = msg else {
-                // TODO ask murek, maybe debounce 10 milis or something?
-                scheduler.local(Self::run_idle_tasks);
+                idle_job_debounce.run_debounced(|| {
+                    let mutated = Self::run_idle_tasks(&mut scheduler.state);
+                    // Tricky way of running post hooks only if something changed.
+                    // TODO find better interface for this.
+                    if mutated {
+                        scheduler.dispatch(Task::nothing());
+                    }
+                });
+
+                // Avoid busy-waiting, sleep for a short duration
+                std::thread::sleep(Duration::from_millis(1));
 
                 continue;
             };
@@ -369,18 +384,12 @@ impl Backend {
 
     /// Executes tasks when there is no incoming message.
     /// Warning! Keep it very cheap!
-    fn run_idle_tasks(
-        state: &mut State,
-        _notifier: Notifier,
-        _requester: &mut Requester<'_>,
-        _responder: Responder,
-    ) {
+    fn run_idle_tasks(state: &mut State) -> bool {
         state.proc_macro_controller.maybe_update_state(
             &mut state.db,
-            &mut state.proc_macro_debouncer,
             &state.config,
             &state.scarb_toolchain,
-        );
+        )
     }
 
     /// Calls [`lang::db::AnalysisDatabaseSwapper::maybe_swap`] to do its work.
@@ -397,6 +406,15 @@ impl Backend {
     /// Calls [`lang::diagnostics::DiagnosticsController::refresh`] to do its work.
     fn refresh_diagnostics(state: &mut State, notifier: Notifier) {
         state.diagnostics_controller.refresh(state.snapshot(), notifier);
+    }
+
+    /// Calls [`lang::proc_macros::client::controller::ProcMacroClientController::initialize_if_enabled_now`] to do its work.
+    fn maybe_start_proc_macro_server(state: &mut State, _notifier: Notifier) {
+        state.proc_macro_controller.initialize_if_enabled_now(
+            &mut state.db,
+            &state.config,
+            &state.scarb_toolchain,
+        );
     }
 
     /// Tries to detect the crate root the config that contains a cairo file, and add it to the

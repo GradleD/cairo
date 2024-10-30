@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use controller::{ClientStatusChange, ProcMacroClientStatusChange};
 use proc_macro_server_api::methods::defined_macros::{
     DefinedMacros, DefinedMacrosParams, DefinedMacrosResponse,
@@ -69,7 +69,7 @@ impl ProcMacroClient {
     fn fetch_defined_macros(&self) -> Result<DefinedMacrosResponse> {
         let id = self.send_request::<DefinedMacros>(&DefinedMacrosParams {})?;
 
-        if id == 0 {
+        if id != 0 {
             bail!(
                 "fetching defined macros should be first sended request, it is {id} (zero \
                  counting)"

@@ -13,7 +13,7 @@ use convert_case::{Case, Casing};
 use proc_macro_server_api::methods::expand::{ExpandAttributeParams, ExpandDeriveParams};
 use scarb_stable_hash::StableHasher;
 
-use super::{FromSyntaxNode, into_cairo_diagnostics};
+use super::{into_cairo_diagnostics, FromSyntaxNode};
 use crate::lang::db::AnalysisDatabase;
 use crate::lang::proc_macros::cache_group::ProcMacroCacheGroup;
 
@@ -266,13 +266,14 @@ fn expand_derives(
 
                 Some(PluginGeneratedFile {
                     name: "proc_macro_derive".into(),
-                    code_mappings: vec![CodeMapping {
-                        origin: CodeOrigin::Span(span),
-                        span: TextSpan {
-                            start: TextOffset::default(),
-                            end: TextOffset::default().add_width(TextWidth::from_str(&content)),
-                        },
-                    }],
+                    // code_mappings: vec![CodeMapping {
+                    //     origin: CodeOrigin::Span(span),
+                    //     span: TextSpan {
+                    //         start: TextOffset::default(),
+                    //         end: TextOffset::default().add_width(TextWidth::from_str(&content)),
+                    //     },
+                    // }],
+                    code_mappings: Default::default(),
                     content,
                     aux_data: None,
                 })
@@ -335,13 +336,14 @@ fn expand_attribute(
     PluginResult {
         code: Some(PluginGeneratedFile {
             name: file_name.into(),
-            code_mappings: vec![CodeMapping {
-                origin: CodeOrigin::Span(span),
-                span: TextSpan {
-                    start: TextOffset::default(),
-                    end: TextOffset::default().add_width(TextWidth::from_str(&content)),
-                },
-            }],
+            // code_mappings: vec![CodeMapping {
+            //     origin: CodeOrigin::Span(span),
+            //     span: TextSpan {
+            //         start: TextOffset::default(),
+            //         end: TextOffset::default().add_width(TextWidth::from_str(&content)),
+            //     },
+            // }],
+            code_mappings: Default::default(),
             content,
             aux_data: None,
         }),

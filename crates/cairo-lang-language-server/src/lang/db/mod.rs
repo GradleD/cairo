@@ -1,11 +1,11 @@
-use cairo_lang_defs::db::{DefsDatabase, DefsGroup, try_ext_as_virtual_impl};
+use cairo_lang_defs::db::{try_ext_as_virtual_impl, DefsDatabase, DefsGroup};
 use cairo_lang_doc::db::DocDatabase;
 use cairo_lang_filesystem::cfg::{Cfg, CfgSet};
 use cairo_lang_filesystem::db::{
-    AsFilesGroupMut, ExternalFiles, FilesDatabase, FilesGroup, init_files_group,
+    init_files_group, AsFilesGroupMut, ExternalFiles, FilesDatabase, FilesGroup,
 };
 use cairo_lang_filesystem::ids::VirtualFile;
-use cairo_lang_lowering::db::{LoweringDatabase, LoweringGroup, init_lowering_group};
+use cairo_lang_lowering::db::{init_lowering_group, LoweringDatabase, LoweringGroup};
 use cairo_lang_lowering::utils::InliningStrategy;
 use cairo_lang_parser::db::{ParserDatabase, ParserGroup};
 use cairo_lang_semantic::db::{SemanticDatabase, SemanticGroup};
@@ -52,14 +52,17 @@ impl AnalysisDatabase {
 
         db.set_cfg_set(Self::initial_cfg_set().into());
 
-        let plugin_suite =
-            [get_default_plugin_suite(), starknet_plugin_suite(), test_plugin_suite()]
-                .into_iter()
-                .chain(tricks.extra_plugin_suites.iter().flat_map(|f| f()))
-                .fold(PluginSuite::default(), |mut acc, suite| {
-                    acc.add(suite);
-                    acc
-                });
+        let plugin_suite = [
+            get_default_plugin_suite(),
+            starknet_plugin_suite(),
+            //test_plugin_suite()
+        ]
+        .into_iter()
+        .chain(tricks.extra_plugin_suites.iter().flat_map(|f| f()))
+        .fold(PluginSuite::default(), |mut acc, suite| {
+            acc.add(suite);
+            acc
+        });
         db.apply_plugin_suite(plugin_suite);
 
         // proc-macro-server can be restarted many times but we want to keep these data across

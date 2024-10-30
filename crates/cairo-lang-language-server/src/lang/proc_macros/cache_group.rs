@@ -1,8 +1,8 @@
 use cairo_lang_macro::TokenStream;
-use proc_macro_server_api::methods::ProcMacroResult;
 use proc_macro_server_api::methods::expand::{
     ExpandAttributeParams, ExpandDeriveParams, ExpandInlineMacroParams,
 };
+use proc_macro_server_api::methods::ProcMacroResult;
 use rustc_hash::FxHashMap;
 
 use super::client::controller::ClientStatus;

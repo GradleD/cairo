@@ -3,10 +3,10 @@ use cairo_lang_filesystem::ids::{CodeMapping, CodeOrigin};
 use cairo_lang_filesystem::span::{TextOffset, TextSpan, TextWidth};
 use cairo_lang_macro::TokenStream;
 use cairo_lang_syntax::node::db::SyntaxGroup;
-use cairo_lang_syntax::node::{TypedStablePtr, TypedSyntaxNode, ast};
+use cairo_lang_syntax::node::{ast, TypedStablePtr, TypedSyntaxNode};
 use proc_macro_server_api::methods::ProcMacroResult;
 
-use super::{FromSyntaxNode, into_cairo_diagnostics};
+use super::{into_cairo_diagnostics, FromSyntaxNode};
 
 // scarb code
 
@@ -32,13 +32,14 @@ pub(super) fn inline_macro_generate_code(
         InlinePluginResult {
             code: Some(PluginGeneratedFile {
                 name: "inline_proc_macro".into(),
-                code_mappings: vec![CodeMapping {
-                    origin,
-                    span: TextSpan {
-                        start: TextOffset::default(),
-                        end: TextOffset::default().add_width(TextWidth::from_str(&content)),
-                    },
-                }],
+                // code_mappings: vec![CodeMapping {
+                //     origin,
+                //     span: TextSpan {
+                //         start: TextOffset::default(),
+                //         end: TextOffset::default().add_width(TextWidth::from_str(&content)),
+                //     },
+                // }],
+                code_mappings: Default::default(),
                 content,
                 aux_data: None,
             }),
